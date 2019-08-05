@@ -44,25 +44,30 @@ const run = async (blockHeight) => {
                 const addresses = output.scriptPubKey.addresses
                 const n = output.n
                 if ((value && type && addresses) && type !== "nonstandard") {
-                    const unspentTXO = new TXO({
-                        txid: decodetx.txid,
-                        height: block.height,
-                        time: block.time,
-                        value,
-                        n,
-                        type,
-                        addresses
-                    })
-                    unspentTXOs.push(unspentTXO)
+                    const found = await TXO.findOne({txid: decodetx.txid, n})
+                    
+                    if (!found) {
+                        const unspentTXO = new TXO({
+                            txid: decodetx.txid,
+                            height: block.height,
+                            time: block.time,
+                            value,
+                            n,
+                            type,
+                            addresses
+                        })
+                        unspentTXOs.push(unspentTXO)
+                    }
+                    
                 }
             }
         }
 
+        console.log(`block ${block.height} get ${block.tx.length} txs`)
+        
         await TXO.insertMany(unspentTXOs)
 
-        console.log(`block ${blockHeight} get ${block.tx.length} txs`)
-
-        run(blockHeight + 1)
+        run(block.height + 1)
 
     } catch (err) {
         console.log(err)
@@ -84,8 +89,8 @@ const rollback = async () => {
 const start = async () => {
     try {
         const blockHeight = await rollback()
-        console.log({ blockHeight })
-
+        console.log(`rollback from block ${blockHeight}`)
+        
         await run(blockHeight)
     } catch (error) {
         console.log(error)
