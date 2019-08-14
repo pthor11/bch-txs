@@ -13,7 +13,6 @@ const mongo = {
 
 const rpc = {
     url: process.env.BCH_NODE_URL,
-    port: process.env.BCH_NODE_PORT,
     username: process.env.BCH_NODE_USERNAME,
     password: process.env.BCH_NODE_PASSWORD,
 }
