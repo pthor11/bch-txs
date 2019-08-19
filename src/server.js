@@ -13,7 +13,7 @@ const run = async (blockHeight) => {
         const block = block_response.data.result
 
         if (!block) {
-            console.log(`bch-txs is up to date`)
+            console.log(`get block height ${blockHeight} failed`)
             setTimeout(start, 1000)
             return Promise.resolve(true)
         }
@@ -70,7 +70,11 @@ const run = async (blockHeight) => {
         run(block.height + 1)
 
     } catch (err) {
-        console.log(err)
+        if (error.response.data.error.code === -1) {
+            console.log(`bch-txs is up to date`)
+        } else {
+            console.log(error.response.data)
+        }
         setTimeout(start, 1000)
     }
 
@@ -88,7 +92,7 @@ const rollback = async () => {
 
 const start = async () => {
     try {
-        const blockHeight = await rollback()
+        const blockHeight = 55555555555//await rollback()
         console.log(`rollback from block ${blockHeight}`)
         
         await run(blockHeight)
