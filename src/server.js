@@ -1,6 +1,52 @@
 import rpc from './rpc'
 import TXO from './models/TXO'
 
+const LIMIT = 900
+
+const getTX = async (txid, block) => {
+    try {
+        const rawtx_response = await rpc('getrawtransaction', [txid])
+        const rawtx = rawtx_response.data.result
+        const decodetx_response = await rpc('decoderawtransaction', [rawtx])
+        const decodetx = decodetx_response.data.result
+
+        await Promise.all(decodetx.vin.map(input => TXO.findOneAndUpdate({ $and: [{ txid: input.txid }, { n: input.vout }] }, { $set: { spent: decodetx.txid } })))
+
+        let unspentTXOs = []
+
+        for (const output of decodetx.vout) {
+            const value = output.value
+            const type = output.scriptPubKey.type
+            const addresses = output.scriptPubKey.addresses
+            const n = output.n
+            if ((value && type && addresses) && type !== "nonstandard") {
+                const unspentTXO = {
+                    txid: decodetx.txid,
+                    height: block.height,
+                    time: block.time,
+                    value,
+                    n,
+                    type,
+                    addresses
+                }
+                unspentTXOs.push(unspentTXO)
+            }
+        }
+        return Promise.resolve(unspentTXOs)
+    } catch (error) {
+        console.log(error.response)
+        return Promise.resolve(null)
+    }
+}
+
+function chunkArrayInGroups(arr, size) {
+    var myArray = [];
+    for (var i = 0; i < arr.length; i += size) {
+        myArray.push(arr.slice(i, i + size));
+    }
+    return myArray;
+}
+
 const run = async (blockHeight) => {
     try {
 
@@ -18,62 +64,40 @@ const run = async (blockHeight) => {
             return Promise.resolve(true)
         }
 
-        let unspentTXOs = []
+        const unspentTXOs_groups = chunkArrayInGroups(block.tx, LIMIT)
 
-        for (const txid of block.tx) {
-            let rawtx_response = null
-            try {
-                rawtx_response = await rpc('getrawtransaction', [txid])
-            } catch (err) {
-                if (err.response.data.error.message === 'The genesis block coinbase is not considered an ordinary transaction and cannot be retrieved') {
-                    continue
-                }
-            }
+        // console.log({unspentTXOs_groups})
 
-            const rawtx = rawtx_response.data.result
-            const decodetx_response = await rpc('decoderawtransaction', [rawtx])
-            const decodetx = decodetx_response.data.result
+        let total_utxos = []
 
-            for (const input of decodetx.vin) {
-                await TXO.findOneAndUpdate({ $and: [{ txid: input.txid }, { n: input.vout }] }, { $set: { spent: decodetx.txid } })
-            }
+        for (const group of unspentTXOs_groups) {
+            console.log({ group: group.length })
 
-            for (const output of decodetx.vout) {
-                const value = output.value
-                const type = output.scriptPubKey.type
-                const addresses = output.scriptPubKey.addresses
-                const n = output.n
-                if ((value && type && addresses) && type !== "nonstandard") {
-                    const found = await TXO.findOne({txid: decodetx.txid, n})
-                    
-                    if (!found) {
-                        const unspentTXO = new TXO({
-                            txid: decodetx.txid,
-                            height: block.height,
-                            time: block.time,
-                            value,
-                            n,
-                            type,
-                            addresses
-                        })
-                        unspentTXOs.push(unspentTXO)
-                    }
-                    
-                }
-            }
+            const unspentTXOs_array = await Promise.all(group.map(txid => getTX(txid, block)))
+
+            const unspentTXOs = unspentTXOs_array.filter(array => (array !== null) || (array !== undefined)).reduce((unspentTXOs, arr) => {
+                unspentTXOs = [...unspentTXOs, ...arr]
+                return unspentTXOs
+            }, [])
+
+            // console.log({unspentTXOs});
+            
+            total_utxos = [...total_utxos, ...unspentTXOs]            
         }
 
-        console.log(`block ${block.height} get ${block.tx.length} txs`)
+        // console.log({total_utxos});
+
+        await TXO.insertMany(total_utxos)
         
-        await TXO.insertMany(unspentTXOs)
+        console.log(`block ${block.height} get ${block.tx.length} txs ${total_utxos.length} utxos`)
 
         run(block.height + 1)
 
-    } catch (err) {
+    } catch (error) {
         if (error.response.data.error.code === -1) {
             console.log(`bch-txs is up to date`)
         } else {
-            console.log(error.response.data)
+            console.log(error.response)
         }
         setTimeout(start, 1000)
     }
@@ -94,7 +118,7 @@ const start = async () => {
     try {
         const blockHeight = await rollback()
         console.log(`rollback from block ${blockHeight}`)
-        
+
         await run(blockHeight)
     } catch (error) {
         console.log(error)
